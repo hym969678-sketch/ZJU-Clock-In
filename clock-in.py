@@ -29,16 +29,14 @@ class DaKa(object):
     def __init__(self, username, password):
         self.username = username
         self.password = password
-        self.login_url = "https://zjuam.zju.edu.cn/cas/login"
-        self.service_url = (
-            "https://healthreport.zju.edu.cn/a_zju/api/sso/index"
-            "?redirect=https%3A%2F%2Fhealthreport.zju.edu.cn%2Fncov%2Fwap%2Fdefault%2Findex"
+        self.login_url = "https://zjuam.zju.edu.cn/cas/login?service=http%3A%2F%2Fservice.zju.edu.cn%2F"
+        self.health_redirect_url = (
+            "https://zjuam.zju.edu.cn/cas/login?service="
+            "https%3A%2F%2Fhealthreport.zju.edu.cn%2Fa_zju%2Fapi%2Fsso%2Findex"
+            "%3Fredirect%3Dhttps%253A%252F%252Fhealthreport.zju.edu.cn"
+            "%252Fncov%252Fwap%252Fdefault%252Findex%26from%3Dwap"
         )
-        self.service_login_url = (
-            self.login_url + "?service=" + quote(self.service_url, safe="")
-        )
-        self.base_url = "https://healthreport.zju.edu.cn/ncov/wap/default/index"
-        self.save_url = "https://healthreport.zju.edu.cn/ncov/wap/default/save"
+        self.base_url = "https://healthreport.zju.edu.cn/ncov/wap/default/index"        self.save_url = "https://healthreport.zju.edu.cn/ncov/wap/default/save"
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Safari/537.36"
         }
@@ -106,14 +104,18 @@ class DaKa(object):
             )
             raise LoginError(f"统一身份认证失败：{detail}")
 
-        service_res = self.sess.get(
-            self.service_login_url,
+        redirect_res = self.sess.get(
+            self.health_redirect_url,
             headers=self.headers,
             allow_redirects=True,
             timeout=30,
         )
-        service_res.raise_for_status()
-        if "zjuam.zju.edu.cn/cas/login" in service_res.url:
+        if redirect_res.status_code >= 400:
+            raise LoginError(
+                "健康上报服务跳转失败："
+                f"HTTP {redirect_res.status_code}, url={redirect_res.url}"
+            )
+        if "zjuam.zju.edu.cn/cas/login" in redirect_res.url:
             raise LoginError("统一身份认证成功后未能跳转到健康上报服务")
 
         return self.sess
