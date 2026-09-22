@@ -23,11 +23,7 @@ class ClockInError(Exception):
 
 
 def login_form_present(driver):
-    return any(
-        element.is_displayed()
-        for element in driver.find_elements(By.ID, "username")
-    )
-
+    return bool(driver.find_elements(By.ID, "username"))
 
 def visible_error(driver):
     values = []
