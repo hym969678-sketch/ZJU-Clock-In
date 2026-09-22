@@ -118,8 +118,18 @@ async function main() {
     page.setDefaultTimeout(60000);
 
     console.log("打开浙大健康上报页面...");
-    await page.goto(WEB_URL, { waitUntil: "domcontentloaded" });
-    console.log("页面 DOM 已加载，等待前端初始化...");
+    try {
+      await page.goto(WEB_URL, {
+        waitUntil: "domcontentloaded",
+        timeout: 20000,
+      });
+      console.log("页面 DOM 已加载，等待前端初始化...");
+    } catch (error) {
+      if (!String(error?.message || error).includes("Navigation timeout")) {
+        throw error;
+      }
+      console.log("页面仍在加载，继续使用当前文档...");
+    }
 
     await page.waitForFunction(
       () => Boolean(document.querySelector("#username") || window.vm?.oldInfo)
