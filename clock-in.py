@@ -136,6 +136,7 @@ def submit_form(driver, wait):
 
 def run_check_in(username, password):
     options = Options()
+    options.page_load_strategy = "none"
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
