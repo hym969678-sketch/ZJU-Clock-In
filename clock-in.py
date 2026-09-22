@@ -36,7 +36,8 @@ class DaKa(object):
             "%3Fredirect%3Dhttps%253A%252F%252Fhealthreport.zju.edu.cn"
             "%252Fncov%252Fwap%252Fdefault%252Findex%26from%3Dwap"
         )
-        self.base_url = "https://healthreport.zju.edu.cn/ncov/wap/default/index"        self.save_url = "https://healthreport.zju.edu.cn/ncov/wap/default/save"
+        self.base_url = "https://healthreport.zju.edu.cn/ncov/wap/default/index"
+        self.save_url = "https://healthreport.zju.edu.cn/ncov/wap/default/save"
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Safari/537.36"
         }
