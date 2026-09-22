@@ -142,12 +142,15 @@ def run_check_in(username, password):
     driver = None
     try:
         driver = webdriver.Chrome(options=options)
-        driver.set_page_load_timeout(90)
-        wait = WebDriverWait(driver, 90)
+        driver.set_page_load_timeout(20)
+        driver.set_script_timeout(20)
+        wait = WebDriverWait(driver, 60)
 
         print("打开浙大健康上报页面...")
         driver.get(WEB_URL)
+        print("页面请求已返回，等待前端初始化...")
         time.sleep(8)
+        print("检查登录表单...")
 
         if login_form_present(driver):
             username_input = WebDriverWait(driver, 60).until(
