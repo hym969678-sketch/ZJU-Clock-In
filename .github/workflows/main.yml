@@ -18,7 +18,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Install dependencies
-        run: python3 -m pip install --disable-pip-version-check requests
+        run: |
+          python3 -m pip install --disable-pip-version-check selenium
+          sudo apt-get update -y
+          sudo apt-get install -y tesseract-ocr
       - name: Clock In
         env:
           ACCOUNT: ${{ secrets.ACCOUNT }}
