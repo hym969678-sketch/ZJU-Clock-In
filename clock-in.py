@@ -22,25 +22,20 @@ class ClockInError(Exception):
     pass
 
 
-def has_old_info(driver):
-    return bool(
-        driver.execute_script(
-            "return Boolean(window.vm && window.vm.oldInfo);"
-        )
+def login_form_present(driver):
+    return any(
+        element.is_displayed()
+        for element in driver.find_elements(By.ID, "username")
     )
 
 
 def visible_error(driver):
-    values = driver.execute_script(
-        """
-        return [
-          document.getElementById('msg')?.textContent || '',
-          document.querySelector('.wapat-title')?.textContent || '',
-          document.querySelector('.wapcf-title')?.textContent || ''
-        ];
-        """
-    )
-    return " ".join(str(value).strip() for value in values if value).strip()
+    values = []
+    for selector in ("#msg", ".wapat-title", ".wapcf-title"):
+        for element in driver.find_elements(By.CSS_SELECTOR, selector):
+            if element.is_displayed() and element.text.strip():
+                values.append(element.text.strip())
+    return " ".join(values)
 
 
 def recognize_verify_code(driver):
@@ -152,20 +147,21 @@ def run_check_in(username, password):
 
         print("打开浙大健康上报页面...")
         driver.get(WEB_URL)
+        time.sleep(8)
 
-        if not has_old_info(driver):
-            username_input = wait.until(
-                EC.presence_of_element_located((By.ID, "username"))
+        if login_form_present(driver):
+            username_input = WebDriverWait(driver, 60).until(
+                EC.visibility_of_element_located((By.ID, "username"))
             )
-            password_input = wait.until(
-                EC.presence_of_element_located((By.ID, "password"))
+            password_input = WebDriverWait(driver, 60).until(
+                EC.visibility_of_element_located((By.ID, "password"))
             )
             username_input.clear()
             username_input.send_keys(username)
             password_input.clear()
             password_input.send_keys(password)
 
-            login_button = wait.until(
+            login_button = WebDriverWait(driver, 30).until(
                 EC.element_to_be_clickable(
                     (By.CSS_SELECTOR, ".login-button > button")
                 )
@@ -173,12 +169,17 @@ def run_check_in(username, password):
             login_button.click()
 
             try:
-                wait.until(lambda current: has_old_info(current))
+                WebDriverWait(driver, 60).until(
+                    lambda current: not login_form_present(current)
+                    or bool(visible_error(current))
+                )
             except TimeoutException as error:
-                message = visible_error(driver)
-                raise ClockInError(
-                    message or "登录后未加载到健康上报表单"
-                ) from error
+                raise ClockInError("登录后页面没有完成跳转") from error
+
+            message = visible_error(driver)
+            if message and login_form_present(driver):
+                raise ClockInError(f"登录失败：{message}")
+            time.sleep(5)
 
         print("已登录到浙大健康上报页面")
         print("正在提交打卡...")
