@@ -20,11 +20,11 @@ jobs:
         uses: actions/checkout@v4
       - name: Install dependencies
         run: |
-          python3 -m pip install --disable-pip-version-check selenium
+          npm install --no-save puppeteer-core chrome-launcher
           sudo apt-get update -y
           sudo apt-get install -y tesseract-ocr
       - name: Clock In
         env:
           ACCOUNT: ${{ secrets.ACCOUNT }}
           PASSWORD: ${{ secrets.PASSWORD }}
-        run: python3 -u clock-in.py
+        run: node clock-in.js
