@@ -6,8 +6,11 @@ import requests
 import json
 import re
 import datetime
+import os
 import time
 import sys
+from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 
 class DaKa(object):
@@ -26,64 +29,131 @@ class DaKa(object):
     def __init__(self, username, password):
         self.username = username
         self.password = password
-        self.login_url = "https://zjuam.zju.edu.cn/cas/login?service=https%3A%2F%2Fhealthreport.zju.edu.cn%2Fa_zju%2Fapi%2Fsso%2Findex%3Fredirect%3Dhttps%253A%252F%252Fhealthreport.zju.edu.cn%252Fncov%252Fwap%252Fdefault%252Findex"
-        self.base_url = "https://healthreport.zju.edu.cn/ncov/wap/default/index"
-        self.save_url = "https://healthreport.zju.edu.cn/ncov/wap/default/save"
+        self.login_url = "https://zjuam.zju.edu.cn/cas/login"
+        self.service_url = (
+            "https://healthreport.zju.edu.cn/a_zju/api/sso/index"
+            "?redirect=https%3A%2F%2Fhealthreport.zju.edu.cn%2Fncov%2Fwap%2Fdefault%2Findex"
+        )
+        self.service_login_url = (
+            self.login_url + "?service=" + quote(self.service_url, safe="")
+        )
+        self.base_url = "https://healthreport.zju.edu.cn/ncov/wap/default/index"        self.save_url = "https://healthreport.zju.edu.cn/ncov/wap/default/save"
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Safari/537.36"
         }
         self.sess = requests.Session()
 
     def login(self):
-        """Login to ZJU platform"""
-        res = self.sess.get(self.login_url, headers=self.headers)
-        execution = re.search(
-            'name="execution" value="(.*?)"', res.text).group(1)
-        res = self.sess.get(
-            url='https://zjuam.zju.edu.cn/cas/v2/getPubKey', headers=self.headers).json()
-        n, e = res['modulus'], res['exponent']
-        encrypt_password = self._rsa_encrypt(self.password, e, n)
+        """Login to ZJU platform."""
+        res = self.sess.get(self.login_url, headers=self.headers, timeout=30)
+        res.raise_for_status()
+
+        execution_match = re.search(
+            r'name=["\']execution["\'][^>]*value=["\']([^"\']+)["\']',
+            res.text,
+            re.IGNORECASE,
+        )
+        if execution_match is None:
+            execution_match = re.search(
+                r'value=["\']([^"\']+)["\'][^>]*name=["\']execution["\']',
+                res.text,
+                re.IGNORECASE,
+            )
+        if execution_match is None:
+            raise LoginError(
+                "统一身份认证页面未找到 execution 参数，"
+                f"status={res.status_code}, url={res.url}"
+            )
+        execution = execution_match.group(1)
+
+        pubkey = self.sess.get(
+            "https://zjuam.zju.edu.cn/cas/v2/getPubKey",
+            headers=self.headers,
+            timeout=30,
+        )
+        pubkey.raise_for_status()
+        key_data = pubkey.json()
+        encrypt_password = self._rsa_encrypt(
+            self.password, key_data["exponent"], key_data["modulus"]
+        )
 
         data = {
-            'username': self.username,
-            'password': encrypt_password,
-            'execution': execution,
-            '_eventId': 'submit'
+            "username": self.username,
+            "password": encrypt_password,
+            "execution": execution,
+            "_eventId": "submit",
+            "authcode": "",
         }
-        res = self.sess.post(url=self.login_url, data=data, headers=self.headers)
+        post_headers = dict(self.headers)
+        post_headers["Content-Type"] = "application/x-www-form-urlencoded"
+        res = self.sess.post(
+            self.login_url,
+            data=data,
+            headers=post_headers,
+            allow_redirects=False,
+            timeout=30,
+        )
 
-        # check if login successfully
-        if '统一身份认证' in res.content.decode():
-            raise LoginError('登录失败，请核实账号密码重新登录')
+        if res.status_code not in (301, 302, 303, 307, 308):
+            message = re.search(
+                r'<span[^>]+id=["\']msg["\'][^>]*>(.*?)</span>',
+                res.text,
+                re.IGNORECASE | re.DOTALL,
+            )
+            detail = re.sub(r"\s+", " ", message.group(1)).strip() if message else (
+                f"HTTP {res.status_code}"
+            )
+            raise LoginError(f"统一身份认证失败：{detail}")
+
+        service_res = self.sess.get(
+            self.service_login_url,
+            headers=self.headers,
+            allow_redirects=True,
+            timeout=30,
+        )
+        service_res.raise_for_status()
+        if "zjuam.zju.edu.cn/cas/login" in service_res.url:
+            raise LoginError("统一身份认证成功后未能跳转到健康上报服务")
+
         return self.sess
 
     def post(self):
-        """Post the hitcard info"""
-        res = self.sess.post(self.save_url, data=self.info, headers=self.headers)
-        return json.loads(res.text)
+        """Post the hitcard info."""
+        res = self.sess.post(
+            self.save_url,
+            data=self.info,
+            headers=self.headers,
+            timeout=30,
+        )
+        res.raise_for_status()
+        return res.json()
 
     def get_date(self):
-        """Get current date"""
-        today = datetime.date.today()
-        return "%4d%02d%02d" % (today.year, today.month, today.day)
+        """Get current date in China Standard Time."""
+        today = datetime.datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        return today.strftime("%Y%m%d")
 
     def get_info(self, html=None):
         """Get hitcard info, which is the old info with updated new time."""
         if not html:
-            res = self.sess.get(self.base_url, headers=self.headers)
-            html = res.content.decode()
+            res = self.sess.get(self.base_url, headers=self.headers, timeout=30)
+            res.raise_for_status()
+            html = res.content.decode(res.encoding or "utf-8", errors="replace")
 
         try:
-            old_infos = re.findall(r'oldInfo: ({[^\n]+})', html)
+            old_infos = re.findall(r'oldInfo\s*:\s*(\{[^\r\n]+\})', html)
             if len(old_infos) != 0:
                 old_info = json.loads(old_infos[0])
             else:
                 raise RegexMatchError("未发现缓存信息，请先至少手动成功打卡一次再运行脚本")
 
-            new_info_tmp = json.loads(re.findall(r'def = ({[^\n]+})', html)[0])
+            default_infos = re.findall(r'def\s*=\s*(\{[^\r\n]+\})', html)
+            if not default_infos:
+                raise RegexMatchError("未发现默认打卡信息")
+            new_info_tmp = json.loads(default_infos[0])
             new_id = new_info_tmp['id']
-            name = re.findall(r'realname: "([^\"]+)",', html)[0]
-            number = re.findall(r"number: '([^\']+)',", html)[0]
+            name = re.findall(r'realname\s*:\s*"([^"\]+)"', html)[0]
+            number = re.findall(r"number\s*:\s*'([^'\]+)'", html)[0]
         except IndexError:
             raise RegexMatchError('Relative info not found in html with regex')
         except json.decoder.JSONDecodeError:
@@ -137,50 +207,49 @@ class DecodeError(Exception):
 
 
 def main(username, password):
-    """Hit card process
-
-    Arguments:
-        username: (str) 浙大统一认证平台用户名（一般为学号）
-        password: (str) 浙大统一认证平台密码
-    """
-    print("\n[Time] %s" %
-          datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    """Run the complete check-in process."""
+    print(
+        "\n[Time] %s"
+        % datetime.datetime.now(ZoneInfo("Asia/Shanghai")).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+    )
     print("🚌 打卡任务启动")
 
     dk = DaKa(username, password)
 
     print("登录到浙大统一身份认证平台...")
-    try:
-        dk.login()
-        print("已登录到浙大统一身份认证平台")
-    except Exception as err:
-        print(str(err))
-        raise Exception
+    dk.login()
+    print("已登录到浙大统一身份认证平台")
 
-    print('正在获取个人信息...')
-    try:
-        dk.get_info()
-        print('已成功获取个人信息')
-    except Exception as err:
-        print('获取信息失败，请手动打卡，更多信息: ' + str(err))
-        raise Exception
+    print("正在获取个人信息...")
+    dk.get_info()
+    print("已成功获取个人信息")
 
-    print('正在为您打卡打卡打卡')
-    try:
-        res = dk.post()
-        if str(res['e']) == '0':
-            print('已为您打卡成功！')
-        else:
-            print(res['m'])
-    except Exception:
-        print('数据提交失败')
-        raise Exception
+    print("正在提交打卡...")
+    result = dk.post()
+    if str(result.get("e")) != "0":
+        raise RuntimeError(
+            result.get("m") or json.dumps(result, ensure_ascii=False)
+        )
+    print("已为您打卡成功！")
 
 
 if __name__ == "__main__":
-    username = sys.argv[1]
-    password = sys.argv[2]
+    username = os.environ.get("ACCOUNT")
+    password = os.environ.get("PASSWORD")
+
+    if not username and len(sys.argv) > 1:
+        username = sys.argv[1]
+    if not password and len(sys.argv) > 2:
+        password = sys.argv[2]
+
+    if not username or not password:
+        print("请在仓库 Secrets 中配置 ACCOUNT 和 PASSWORD")
+        sys.exit(2)
+
     try:
         main(username, password)
-    except Exception:
-        exit(1)
+    except Exception as err:
+        print(f"打卡失败：{err}")
+        sys.exit(1)
